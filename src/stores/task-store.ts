@@ -280,6 +280,14 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       set({ phase: 'error', error: toAppError(error) })
     } finally {
       pipelineInFlight = false
+      // 竞态兜底：流水线运行期间 taskId 被并发提交/恢复替换（旧流水线在
+      // `taskId !== 任务` 检查处退出），且视图 effect 早已因 pipelineInFlight
+      // 早退、状态不再变化 → effect 永不重触发，页面会永久卡住。
+      // 此时状态仍停在 fetching，说明新任务还没人跑 → 主动补跑。
+      const state = get()
+      if (state.phase === 'fetching' && state.taskId && state.taskId !== taskId) {
+        void get().runPipeline()
+      }
     }
   },
 

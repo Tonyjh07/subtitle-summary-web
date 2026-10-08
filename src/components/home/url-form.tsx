@@ -47,13 +47,17 @@ export function UrlForm({ url, onUrlChange }: UrlFormProps) {
     submittingRef.current = true
     setSubmitting(true)
     const taskId = await submitUrl(trimmed)
-    submittingRef.current = false
-    setSubmitting(false)
 
     if (taskId) {
+      // 成功：保持锁定直到路由卸载本组件。router.push 是异步软导航，
+      // 若此刻解锁，导航途中（几十 ms 窗口）的再次点击会发起第二次提交，
+      // 产生两个 taskId 互相覆盖（线上连点 bug）。
       router.push(`/processing/${taskId}`)
       return
     }
+    // 失败：解锁让用户可以重试
+    submittingRef.current = false
+    setSubmitting(false)
     const error = useTaskStore.getState().error
     toast.error(error?.message ?? '解析失败，请稍后重试')
   }
