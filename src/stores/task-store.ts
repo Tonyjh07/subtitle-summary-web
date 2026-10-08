@@ -133,6 +133,14 @@ function stopProgress(): void {
 /** 防止流水线重入（模块级，比 state 快一拍，StrictMode 双调用也只跑一次） */
 let pipelineInFlight = false
 
+/**
+ * 防止提交重入（与 pipelineInFlight 同款）：解析进行中重复提交直接复用同一 Promise。
+ * 背景：`submitting` 是 React 异步 state，快速连击/回车+点击竞态可穿透守卫，
+ * 并发打多个 /api/parse 会加剧 B站限流——前几个失败误报「视频不存在」，
+ * 后成功的那个又自动跳转，出现「报错后自己进入解析」的矛盾现象（线上 bug 实测）。
+ */
+let submitInFlight: Promise<string | null> | null = null
+
 const IDLE = {
   phase: 'idle' as const,
   taskId: null,
@@ -172,30 +180,36 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }
   },
 
-  submitUrl: async (url) => {
-    stopProgress()
-    set({ ...IDLE, phase: 'parsing' })
-    try {
-      const video = await api.parseVideo(url)
-      const taskId = encodeTaskId({
-        v: video.videoId,
-        p: video.platform,
-        s: Date.now(),
-        m: { t: video.title, c: video.cover, d: video.duration },
-      })
-      set({
-        video,
-        sourceUrl: url,
-        taskId,
-        phase: 'fetching',
-        stage: 'parse_link',
-        progress: 2,
-      })
-      return taskId
-    } catch (error) {
-      set({ phase: 'error', error: toAppError(error) })
-      return null
-    }
+  submitUrl: (url) => {
+    if (submitInFlight) return submitInFlight
+    submitInFlight = (async () => {
+      stopProgress()
+      set({ ...IDLE, phase: 'parsing' })
+      try {
+        const video = await api.parseVideo(url)
+        const taskId = encodeTaskId({
+          v: video.videoId,
+          p: video.platform,
+          s: Date.now(),
+          m: { t: video.title, c: video.cover, d: video.duration },
+        })
+        set({
+          video,
+          sourceUrl: url,
+          taskId,
+          phase: 'fetching',
+          stage: 'parse_link',
+          progress: 2,
+        })
+        return taskId
+      } catch (error) {
+        set({ phase: 'error', error: toAppError(error) })
+        return null
+      } finally {
+        submitInFlight = null
+      }
+    })()
+    return submitInFlight
   },
 
   runPipeline: async () => {

@@ -20,10 +20,12 @@ export function UrlForm({ url, onUrlChange }: UrlFormProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const submitUrl = useTaskStore((s) => s.submitUrl)
   const [submitting, setSubmitting] = useState(false)
+  // 同步守卫：`submitting` state 要等重渲染才生效，快速连击会穿透 → 双提交
+  const submittingRef = useRef(false)
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (submitting) return
+    if (submittingRef.current) return
     const trimmed = url.trim()
 
     if (!trimmed) {
@@ -42,8 +44,10 @@ export function UrlForm({ url, onUrlChange }: UrlFormProps) {
       return
     }
 
+    submittingRef.current = true
     setSubmitting(true)
     const taskId = await submitUrl(trimmed)
+    submittingRef.current = false
     setSubmitting(false)
 
     if (taskId) {

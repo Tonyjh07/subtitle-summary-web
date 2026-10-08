@@ -57,10 +57,13 @@ async function throttledFetch(url: string): Promise<Response> {
 type JsonObject = Record<string, unknown>
 
 /**
- * 节流 GET JSON：返回对象载荷，任何失败（网络/超时/非对象/非 JSON）返回 null。
- * 调用方（分层降级）依赖 null 判断「本层未命中」，不抛异常。
+ * 瞬时故障重试次数（412 风控 / 超时 / 连接重置等导致的「拿不到载荷」）。
+ * 每次重试仍走节流队列（相邻请求 ≥1.5s），不会放大请求频率。
+ * 注意：`payload.code !== 0` 属于**明确的服务端应答**（如视频不存在），不重试。
  */
-export async function throttledGetJson(url: string): Promise<JsonObject | null> {
+const FETCH_RETRIES = 2
+
+async function getJsonOnce(url: string): Promise<JsonObject | null> {
   try {
     const response = await throttledFetch(url)
     if (!response.ok) return null
@@ -72,6 +75,20 @@ export async function throttledGetJson(url: string): Promise<JsonObject | null> 
   } catch {
     return null
   }
+}
+
+/**
+ * 节流 GET JSON：返回对象载荷，任何失败（网络/超时/非对象/非 JSON）重试
+ * `FETCH_RETRIES` 次后返回 null。调用方（分层降级）依赖 null 判断「本层未命中」，不抛异常。
+ *
+ * 修复：B站接口偶发 412/超时若不重试，会被上层误报成「视频不存在」或「无字幕」。
+ */
+export async function throttledGetJson(url: string): Promise<JsonObject | null> {
+  for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
+    const payload = await getJsonOnce(url)
+    if (payload) return payload
+  }
+  return null
 }
 
 /**

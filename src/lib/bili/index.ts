@@ -160,14 +160,18 @@ export interface TranscriptResult {
 /**
  * POST /api/subtitle：B站视频页 URL → 文字稿。
  *
- * 覆盖不到字幕（dm/view 无轨道）→ NO_SUBTITLE；
- * 有轨道但下载/解析全部失败 → SUBTITLE_FETCH_FAILED。
+ * 覆盖不到字幕（dm/view 确认无轨道）→ NO_SUBTITLE；
+ * 探测失败或有轨道但下载/解析全部失败 → SUBTITLE_FETCH_FAILED（可重试）。
  */
 export async function fetchTranscript(rawUrl: string): Promise<TranscriptResult> {
   const target = await resolveBiliTarget(rawUrl)
   const info = await requireViewInfo(target)
 
   const tracks = await getSubtitleTracks(info.aid, info.cid)
+  // null = 探测失败（限流/抖动）→ 可重试错误；[] = 确认无字幕 → NO_SUBTITLE
+  if (tracks === null) {
+    throw new ApiError('SUBTITLE_FETCH_FAILED', '字幕接口暂时不可用，请稍后重试')
+  }
   if (tracks.length === 0) {
     throw new ApiError(
       'NO_SUBTITLE',

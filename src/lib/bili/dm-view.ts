@@ -95,17 +95,21 @@ export async function getViewInfo(ref: BiliVideoRef, page = 1): Promise<BiliView
 }
 
 /**
- * dm/view：视频 → 字幕轨道列表（中文优先，AI 轨道仅收 ai_status=2，CC 优先于 AI）；
- * 失败返回空列表（调用方按「空列表 = 无字幕」报 NO_SUBTITLE）。
+ * dm/view：视频 → 字幕轨道列表（中文优先，AI 轨道仅收 ai_status=2，CC 优先于 AI）。
+ *
+ * 返回值语义（侦察报告实测：真无字幕视频返回 code=0 + 空轨道）：
+ * - `null`：探测失败（拿不到载荷 / 非 0 应答，如限流、接口抖动）→ 调用方报可重试的 SUBTITLE_FETCH_FAILED
+ * - `[]`：**确认**该视频无可用字幕 → 调用方报 NO_SUBTITLE
+ * 混淆二者会把「接口暂时不可用」误报成「无字幕，换视频」。
  */
 export async function getSubtitleTracks(
   aid: number,
   cid: number,
-): Promise<BiliSubtitleTrack[]> {
+): Promise<BiliSubtitleTrack[] | null> {
   const payload = await throttledGetJson(
     `${API_BASE}/x/v2/dm/view?aid=${aid}&oid=${cid}&type=1`,
   )
-  if (!payload || payload.code !== 0) return []
+  if (!payload || payload.code !== 0) return null
 
   const data = (payload.data ?? {}) as Record<string, unknown>
   const subtitle = (data.subtitle ?? {}) as Record<string, unknown>
